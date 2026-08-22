@@ -64,8 +64,8 @@ Backend = Next.js API routes (this satisfies the JD's "backend technologies" req
 | Embeddings | **OpenAI `text-embedding-3-small`** | OpenRouter doesn't serve embeddings endpoints, so this needs a separate provider. `text-embedding-3-small` is OpenAI's cheap, high-throughput embedding model (~$0.02 / 1M tokens) — plenty for a curated manual/FAQ corpus, and you already hold a key so there's no new account to set up. `text-embedding-3-large` is the pricier, higher-fidelity alternative if retrieval quality ever needs a bump. |
 | Recall lookup | NHTSA Recalls API (`api.nhtsa.gov`) | Real government API, free, no key — this is the tool-calling / agentic piece. |
 | Ingestion | Small Python script (offline, run once/on-demand) | Matches the prep plan's suggestion to get a low-stakes Python touchpoint without forcing Python into the live app. |
-| Testing | Vitest (unit tests on chunking/retrieval logic), Playwright (one smoke test on the chat flow) | Proportionate to a portfolio project while still hitting the JD's "automated testing" bullet. |
-| CI/CD | GitHub Actions (lint + test on push) → Vercel deploy | Hits the JD's DevOps bullet with minimal overhead. |
+| Testing | Vitest (unit tests, written alongside each phase's logic as it's built — not batched at the end), Playwright (one smoke test on the chat flow, added once Phase 2's UI exists) | Proportionate to a portfolio project while still hitting the JD's "automated testing" bullet, and closer to how a real team actually works: tests land in the same PR as the code they cover. |
+| CI/CD | GitHub Actions (lint + build wired up early, Phase 0/1; test step added as the suite grows) → Vercel deploy | Hits the JD's DevOps bullet with minimal overhead. Turned on early so every push gets validated, not bolted on at the end. |
 | Deployment | Vercel | Matches your existing hosting experience. |
 
 ---
@@ -82,29 +82,39 @@ This is a good first "guided" task: you pick and download 2-3 manuals + FAQ page
 
 ## 5. Phased build plan
 
+**Testing philosophy — write tests alongside the code, not in a batch at the end.** A real team writes the unit test for a piece of logic in the same PR as the logic itself, while the edge cases are fresh, not months later. Each phase below that produces testable logic has its own test bullet for this reason — treat those as part of finishing that phase, not deferred work. Phase 5 is deliberately *not* "write all the tests" — by then, most tests should already exist.
+
 **Phase 0 — Project setup**
 - `git init`, GitHub repo, Next.js + TypeScript scaffold, `.env.example`, base folder structure.
 - Create `CLAUDE.md`, `AGENTS.md`, and the two subagents (§6) *before* writing app code, so the guided sessions from here on have real context to work from.
+- GitHub Actions CI workflow running lint + build on every push — wired up early precisely so it's validating commits from the start of Phase 1 onward, not added retroactively once the app already works. (Still open as of 2026-08-22 — see §8.)
 
 **Phase 1 — Ingestion pipeline**
 - Python script: load PDFs/FAQ → chunk → embed (OpenAI `text-embedding-3-small`) → upsert into Qdrant.
 - You write this yourself; Claude explains chunking strategy trade-offs (fixed-size vs. semantic/section-based — manuals have natural headers, which matters for quality).
+- Every chunk gets `make`/`model`/`year`/`doc_type` payload metadata at upsert time, even though v1's corpus is a single model year — schema-forward so adding more years/models later is a data-loading exercise, not a schema migration. See `docs/decisions.md`.
+- **Vitest unit tests for the chunking logic**, written right after (or alongside) the chunking script itself — e.g. does it split on section headers correctly, does it avoid splitting mid-table, does it attach the right metadata. Add the `test` script to `package.json` and to the CI workflow once these exist.
 
 **Phase 2 — Core RAG chat**
 - `/api/chat` route: embed the user query, retrieve top-k chunks from Qdrant, construct a grounded prompt, call OpenRouter, stream the response.
 - Minimal chat UI (single page, message list + input).
+- **Vitest unit tests for the retrieval/prompt-construction logic** in `/lib/rag` (e.g. prompt assembly given a set of retrieved chunks, top-k selection) — the parts that are pure functions and cheap to test without hitting live Qdrant/OpenRouter.
 
 **Phase 3 — Agentic tool-calling**
 - Add the NHTSA recall lookup as a tool the model can call (OpenRouter/Claude tool-use format).
 - Prompt/system design so the model reliably chooses: answer from retrieval vs. call the recall tool vs. ask for a VIN/model-year when missing.
+- **Vitest unit tests for the tool-call routing/validation logic** in `/lib/agent` (e.g. VIN format validation before calling NHTSA, tool-call argument parsing) — not the live NHTSA call itself, but the logic around it.
 
 **Phase 4 — Mocked action tool**
 - "Schedule a service appointment" as a third tool — no real backend, just a structured confirmation response. Demonstrates action-taking, completes the "agentic workflow" story.
+- **Vitest unit tests for the mocked tool's input validation and response shape.**
 
 **Phase 5 — Polish for interview readiness**
-- Vitest + Playwright tests, GitHub Actions CI, Vercel deploy.
-- Case-study README: problem, architecture diagram, key decisions/trade-offs (pull straight from §3 of this doc), what you'd change at scale (auth, real booking integration, evaluation/observability for RAG quality).
-- Optional: a short `docs/decisions.md` (lightweight ADR log) capturing decisions *as you make them* during the build — more authentic and easier to talk about than reconstructing rationale after the fact.
+- **Playwright smoke test** on the chat flow — this is the one test type that genuinely belongs here, since there's no end-to-end user flow to test until Phase 2's UI exists; no reason to pull it earlier.
+- Extend the GitHub Actions workflow to run the full test suite (not just lint/build) on push.
+- Vercel deploy.
+- Case-study README: problem, architecture diagram, key decisions/trade-offs (pull straight from §3 and `docs/decisions.md`), what you'd change at scale (auth, real booking integration, evaluation/observability for RAG quality).
+- `docs/decisions.md` (lightweight ADR log) — started 2026-08-22; keep it current as decisions get made through the rest of the build, don't backfill it at the end.
 
 ---
 
@@ -159,11 +169,10 @@ This matches your answer of "CLAUDE.md + a couple of scoped subagents" — no sl
 - [x] Scaffold Next.js (TypeScript, App Router)
 - [x] Sign up for Qdrant Cloud, get API key, add to `.env.example`/`.env.local` (OpenAI + OpenRouter keys already held — add those too)
 - [x] Write `CLAUDE.md` and `AGENTS.md`
-- [ ] Write the two subagent definitions (`code-reviewer`, `rag-eval`)
-- [ ] Push local repo to GitHub via `gh repo create` / `gh` CLI
-- [ ] Source and download owner's manuals + FAQ pages for Corolla, 4Runner, Sienna, Tundra, Supra (Phase 1 prep)
-
-
+- [x] Write the two subagent definitions (`code-reviewer`, `rag-eval`)
+- [x] Push local repo to GitHub via `gh repo create` / `gh` CLI — https://github.com/louisiaegerv/gst-service-rag-agent
+- [x] Source and download owner's manuals + FAQ pages for Corolla, 4Runner, Sienna, Tundra, Supra (Phase 1 prep) — `data/sources/` (2026 Warranty & Maintenance Guides + ToyotaCare FAQ), not yet committed
+- [x] Set up GitHub Actions CI workflow (lint + build on push) — moved earlier per the 2026-08-22 testing-philosophy decision, see `docs/decisions.md`
 
 ---
 

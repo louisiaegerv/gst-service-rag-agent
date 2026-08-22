@@ -43,10 +43,13 @@ This is a portfolio/learning project — a working, deployable artifact used to 
 
 ## Commands
 
-- `npm run dev` — start the Next.js dev server (localhost:3000)
-- `npm run build` / `npm run start` — production build and start
-- `npm run lint` — ESLint
+Package manager: **pnpm** (pinned via the `packageManager` field in `package.json`; `pnpm install` respects it automatically).
+
+- `pnpm dev` — start the Next.js dev server (localhost:3000)
+- `pnpm build` / `pnpm start` — production build and start
+- `pnpm lint` — ESLint
 - Ingestion and test commands will be added here once `/scripts/ingest` and the test suites exist (Phases 1 and 5).
+- CI (`.github/workflows/ci.yml`) runs `pnpm install --frozen-lockfile`, `pnpm run lint`, and `pnpm run build` on every push/PR to `master`. A `test` step will be added once Vitest exists (Phase 1).
 
 ## Constraints
 
